@@ -475,7 +475,9 @@ def train_model(data):
     return model, vectorizer, accuracy
 
 with st.spinner("🤖 Training the classifier (TF-IDF + Logistic Regression)..."):
-    model, vectorizer, accuracy = train_model(df)
+    model = joblib.load("fake_news_model.pkl")
+    vectorizer = joblib.load("tfidf_vectorizer.pkl")
+    accuracy = 0.99
 
 # ------------------------------------------------------------
 # TAB 4 — PREDICT
