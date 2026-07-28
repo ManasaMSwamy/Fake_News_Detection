@@ -129,29 +129,6 @@ html, body, [class*="css"]  {
 }
 .result-card h2 { font-family:'Poppins', sans-serif; margin-bottom: 0.3rem; }
 
-/* ---------- Sample test news box ---------- */
-.sample-box {
-    background: #f3f4f6;
-    border-radius: 14px;
-    padding: 1.1rem 1.3rem;
-    font-size: 0.9rem;
-    line-height: 1.55;
-    color: #374151;
-    white-space: pre-wrap;
-    max-height: 320px;
-    overflow-y: auto;
-    animation: fadeInUp 0.5s ease;
-}
-.sample-box .sample-label {
-    font-weight: 700;
-    font-family: 'Poppins', sans-serif;
-    display: block;
-    margin: 0.6rem 0 0.2rem 0;
-}
-.sample-box .sample-label:first-child { margin-top: 0; }
-.sample-label.fake { color: #dc2626; }
-.sample-label.real { color: #059669; }
-
 /* ---------- Buttons ---------- */
 div.stButton > button {
     background: linear-gradient(90deg, #6366f1, #ec4899);
@@ -215,7 +192,7 @@ with st.sidebar:
         "to classify news articles as **Real ✅** or **Fake ❌** based on their text."
     )
     st.markdown("---")
-
+    
 
 # ============================================================
 # LOAD DATASET (cached so it isn't reloaded on every interaction)
@@ -241,10 +218,7 @@ def load_data():
     # Parse date. True.csv has trailing whitespace on some date strings which
     # breaks pandas' single-format inference, so strip first and allow mixed formats.
     df['date'] = df['date'].astype(str).str.strip()
-    df['date'] = pd.to_datetime(
-    df['date'].astype(str).str.strip(),
-    errors="coerce"
-    )
+    df['date'] = pd.to_datetime(df['date'], errors='coerce', format='mixed')
     # Drop the handful of rows (~10) where title/text/date got misaligned in the
     # source Fake.csv, so date contains a URL/junk instead of a real date.
     df = df.dropna(subset=['date']).reset_index(drop=True)
@@ -397,20 +371,6 @@ def clean_text(text):
     text = text.lower()
     text = re.sub(r"http\S+|www\S+", "", text)
     text = re.sub(r"<.*?>", "", text)
-
-    # --- Dataset-artifact removal -------------------------------------
-    # In this dataset almost every True.csv article opens with a wire-service
-    # dateline like "washington (reuters) - ..." while Fake.csv articles
-    # almost never do. Left in, the model just learns "contains reuters" as
-    # a shortcut for Real, so anything typed by hand (which won't have this
-    # exact formatting) gets predicted Fake regardless of actual content.
-    # Stripping it forces the model to learn from the article text itself.
-    text = re.sub(r"^[a-z\s,.\'-]+\(reuters\)\s*-\s*", "", text)
-    text = re.sub(r"\breuters\b", "", text)
-    # Common Fake.csv boilerplate (social-media share prompts, image credits)
-    text = re.sub(r"featured image via.*", "", text)
-    text = re.sub(r"image (credit|via).*", "", text)
-
     return text
 
 # Train the Model
@@ -475,77 +435,146 @@ def train_model(data):
     return model, vectorizer, accuracy
 
 with st.spinner("🤖 Training the classifier (TF-IDF + Logistic Regression)..."):
-    model = joblib.load("fake_news_model.pkl")
-    vectorizer = joblib.load("tfidf_vectorizer.pkl")
-    accuracy = 0.99
+    model, vectorizer, accuracy = train_model(df)
 
 # ------------------------------------------------------------
 # TAB 4 — PREDICT
 # ------------------------------------------------------------
 with tab_predict:
-    st.markdown('<div class="section-title">📄 Sample Test News</div>', unsafe_allow_html=True)
-    st.write("Copy any sample below and paste it into the prediction box.")
 
-    SAMPLE_TEXTS_PATH = "Sample_Texts.txt"
+    # ==========================================
+    # Model Performance
+    # ==========================================
+    st.markdown('<div class="section-title">📊 Model Performance</div>', unsafe_allow_html=True)
 
-    def _load_sample_html():
-        try:
-            with open(SAMPLE_TEXTS_PATH, "r", encoding="utf-8") as f:
-                raw = f.read().strip()
-        except FileNotFoundError:
-            return "<em>Sample_Texts.txt not found in the app folder.</em>"
-
-        html = raw
-        html = html.replace("Fake :", '<span class="sample-label fake">Fake :</span>')
-        html = html.replace("Real :", '<span class="sample-label real">Real :</span>')
-        return html
-
-    st.markdown(f'<div class="sample-box">{_load_sample_html()}</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="section-title">Model Performance</div>', unsafe_allow_html=True)
     st.markdown(f"""
-    <div class="stat-card" style="max-width: 260px;">
+    <div class="stat-card" style="max-width:280px;">
         <div class="stat-icon">🎯</div>
-        <div class="stat-value">{round(accuracy * 100, 2)}%</div>
+        <div class="stat-value">{accuracy*100:.2f}%</div>
         <div class="stat-label">Test Accuracy</div>
     </div>
     """, unsafe_allow_html=True)
 
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ==========================================
+    # Sample Test News
+    # ==========================================
+    st.markdown("""
+    <h2 style="
+        border-left:6px solid #6C63FF;
+        padding-left:15px;
+        font-weight:700;
+        color:#1F2937;">
+        📄 Sample Test News
+    </h2>
+
+    <p style="
+        font-size:18px;
+        color:#444;">
+        Copy any sample below and paste it into the prediction box.
+    </p>
+    """, unsafe_allow_html=True)
+
+    with open("Sample_Texts.txt", "r", encoding="utf-8") as file:
+        sample_text = file.read()
+
+    sample_text = sample_text.replace(
+        "Fake :",
+        "<span style='color:#E53935;font-size:24px;font-weight:bold;'>❌ Fake News</span>"
+    )
+
+    sample_text = sample_text.replace(
+        "Real :",
+        "<span style='color:#16A34A;font-size:24px;font-weight:bold;'>✅ Real News</span>"
+    )
+
+    st.components.v1.html(
+        f"""
+        <div style="
+            background:#F5F7FA;
+            border:1px solid #D1D5DB;
+            border-radius:18px;
+            padding:25px;
+            height:420px;
+            overflow-y:auto;
+            white-space:pre-wrap;
+            font-size:16px;
+            line-height:1.8;
+            color:#222;
+            font-family:Arial,sans-serif;
+            box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+
+            {sample_text}
+
+        </div>
+        """,
+        height=440,
+        scrolling=False
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ==========================================
+    # Try It Yourself
+    # ==========================================
     st.markdown(
-        '<div class="section-title">Try It Yourself '
-        '<span style="font-size:0.85rem; font-weight:500; color:#374151;">'
-        '(check sample test news given above)</span></div>',
+        '<div class="section-title">🤖 Try It Yourself (Check some sample test news are given above)</div>',
         unsafe_allow_html=True
     )
-    text_input = st.text_area("Paste a news headline or article body", "", height=200)
 
-    if st.button('🔮 Predict'):
+    text_input = st.text_area(
+        "Paste a news headline or article body",
+        "",
+        height=220
+    )
+
+    # ==========================================
+    # Prediction
+    # ==========================================
+    if st.button("🔮 Predict"):
+
         if text_input.strip() == "":
-            st.warning("Please enter a title or text to predict.")
+            st.warning("⚠ Please enter a news article.")
+
         else:
-            with st.spinner("Analyzing text..."):
-                combined = clean_text(text_input)
-                vec = vectorizer.transform([combined])
-                prediction = model.predict(vec)[0]
-                proba = model.predict_proba(vec)[0]
+
+            with st.spinner("Analyzing News..."):
+
+                cleaned = clean_text(text_input)
+                vector = vectorizer.transform([cleaned])
+
+                prediction = model.predict(vector)[0]
+                probability = model.predict_proba(vector)[0]
 
             if prediction == 1:
-                conf = round(proba[1] * 100, 2)
+
+                confidence = probability[1] * 100
+
                 st.markdown(f"""
                 <div class="result-card result-real">
                     <h2>✅ Predicted: Real News</h2>
-                    <p>Confidence: <b>{conf}%</b></p>
+                    <p style="font-size:22px;">
+                        Confidence: <b>{confidence:.2f}%</b>
+                    </p>
                 </div>
                 """, unsafe_allow_html=True)
-                st.progress(proba[1])
+
+                st.progress(float(probability[1]))
+
             else:
-                conf = round(proba[0] * 100, 2)
+
+                confidence = probability[0] * 100
+
                 st.markdown(f"""
                 <div class="result-card result-fake">
                     <h2>❌ Predicted: Fake News</h2>
-                    <p>Confidence: <b>{conf}%</b></p>
+                    <p style="font-size:22px;">
+                        Confidence: <b>{confidence:.2f}%</b>
+                    </p>
                 </div>
                 """, unsafe_allow_html=True)
-                st.progress(proba[0])
+
+                st.progress(float(probability[0]))
 
 st.markdown("---")
