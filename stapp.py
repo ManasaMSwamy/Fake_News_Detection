@@ -287,14 +287,14 @@ with tab_explore:
     label_choice = st.selectbox('Select News Type to Preview', df['label_name'].unique())
     st.dataframe(
         df[df['label_name'] == label_choice][['title', 'text', 'subject']].head(),
-        use_container_width=True
+        width=True
     )
 
     st.markdown('<div class="section-title">Browse by Subject</div>', unsafe_allow_html=True)
     subject_choice = st.selectbox('Select Subject', sorted(df['subject'].unique()))
     st.dataframe(
         df[df['subject'] == subject_choice][['title', 'label_name']].head(),
-        use_container_width=True
+        width=True
     )
 
     st.markdown('<div class="section-title">Filter by Word Count</div>', unsafe_allow_html=True)
@@ -363,15 +363,33 @@ with tab_visuals:
 # ============================================================
 # TEXT CLEANING + MODEL TRAINING
 # ============================================================
+import string
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+import nltk
+
+nltk.download("stopwords")
+nltk.download("wordnet")
+
+stop_words = set(stopwords.words("english"))
+lemmatizer = WordNetLemmatizer()
+
 def clean_text(text):
-    # Lightweight cleaning only (URLs/HTML stripped, lowercased). No NLTK
-    # stopword/lemmatizer step is used here — testing showed it doesn't
-    # improve accuracy on this dataset and adds an external download
-    # dependency (nltk stopwords/wordnet corpora) that can fail at runtime.
     text = text.lower()
-    text = re.sub(r"http\S+|www\S+", "", text)
+    text = re.sub(r"http\S+", "", text)
+    text = re.sub(r"www\S+", "", text)
     text = re.sub(r"<.*?>", "", text)
-    return text
+    text = re.sub(r"\d+", "", text)
+    text = text.translate(str.maketrans("", "", string.punctuation))
+
+    words = text.split()
+    words = [
+        lemmatizer.lemmatize(word)
+        for word in words
+        if word not in stop_words
+    ]
+
+    return " ".join(words)
 
 # Train the Model
 # Problem Statement - Predict whether a news article is Fake or Real from its text
@@ -380,201 +398,139 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 
-MODEL_CACHE_PATH = "model_cache.joblib"
-
 @st.cache_resource
-def train_model(data):
-    # If we've already trained on this exact dataset before, load from disk
-    # instead of retraining — makes every restart after the first one instant.
-    if os.path.exists(MODEL_CACHE_PATH):
-        try:
-            cached = joblib.load(MODEL_CACHE_PATH)
-            if cached.get("n_rows") == len(data):
-                return cached["model"], cached["vectorizer"], cached["accuracy"]
-        except Exception:
-            pass  # fall through and retrain if the cache is unreadable/corrupt
-
-    data = data.copy()
-    data["clean_content"] = data["content"].apply(clean_text)
-
-    x = data["clean_content"]
-    y = data['label']
-
-    x_train, x_test, y_train, y_test = train_test_split(
-        x, y, test_size=0.2, random_state=42, stratify=y
-    )
-
-    # Unigrams only (no bigrams) and a smaller vocabulary — this is the biggest
-    # lever on training time and barely moves accuracy on this dataset.
-    vectorizer = TfidfVectorizer(
-        max_features=10000,
-        ngram_range=(1, 1),
-        min_df=2,
-        max_df=0.9,
-        stop_words='english',
-        sublinear_tf=True
-    )
-    x_train_vec = vectorizer.fit_transform(x_train)
-    x_test_vec = vectorizer.transform(x_test)
-
-    # liblinear converges fast on this size of sparse problem and needs far
-    # fewer iterations than the previous max_iter=1000 lbfgs setup.
-    model = LogisticRegression(max_iter=200, C=10, solver='liblinear')
-    model.fit(x_train_vec, y_train)
-
-    accuracy = accuracy_score(y_test, model.predict(x_test_vec))
-
-    try:
-        joblib.dump(
-            {"model": model, "vectorizer": vectorizer, "accuracy": accuracy, "n_rows": len(data)},
-            MODEL_CACHE_PATH,
-        )
-    except Exception:
-        pass  # disk caching is a nice-to-have, not required for the app to work
-
+def load_model():
+    model = joblib.load("fake_news_model.pkl")
+    vectorizer = joblib.load("tfidf_vectorizer.pkl")
+    accuracy = 0.9974   # Your test accuracy (99.74%)
     return model, vectorizer, accuracy
 
-with st.spinner("🤖 Training the classifier (TF-IDF + Logistic Regression)..."):
-    model, vectorizer, accuracy = train_model(df)
+with st.spinner("🤖 Loading trained model..."):
+    model, vectorizer, accuracy = load_model()
 
 # ------------------------------------------------------------
 # TAB 4 — PREDICT
 # ------------------------------------------------------------
 with tab_predict:
 
-    # ==========================================
-    # Model Performance
-    # ==========================================
-    st.markdown('<div class="section-title">📊 Model Performance</div>', unsafe_allow_html=True)
+    # ============================
+    # MODEL PERFORMANCE
+    # ============================
+
+    st.markdown(
+        '<div class="section-title">🎯 Model Performance</div>',
+        unsafe_allow_html=True
+    )
 
     st.markdown(f"""
-    <div class="stat-card" style="max-width:280px;">
-        <div class="stat-icon">🎯</div>
+    <div class="stat-card" style="
+        max-width:280px;
+        margin-bottom:25px;">
+        <div class="stat-icon">🤖</div>
         <div class="stat-value">{accuracy*100:.2f}%</div>
-        <div class="stat-label">Test Accuracy</div>
+        <div class="stat-label">Model Accuracy</div>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+# ==========================================================
+# SAMPLE TEST NEWS
+# ==========================================================
 
-    # ==========================================
-    # Sample Test News
-    # ==========================================
-    st.markdown("""
-    <h2 style="
-        border-left:6px solid #6C63FF;
-        padding-left:15px;
-        font-weight:700;
-        color:#1F2937;">
-        📄 Sample Test News
-    </h2>
+st.markdown(
+    '<div class="section-title">📋 Sample Test News</div>',
+    unsafe_allow_html=True
+)
 
-    <p style="
-        font-size:18px;
-        color:#444;">
-        Copy any sample below and paste it into the prediction box.
-    </p>
-    """, unsafe_allow_html=True)
+st.info("📄 Copy any sample below and paste it into the prediction box.")
+
+if os.path.exists("Sample_Texts.txt"):
 
     with open("Sample_Texts.txt", "r", encoding="utf-8") as file:
         sample_text = file.read()
 
-    sample_text = sample_text.replace(
-        "Fake :",
-        "<span style='color:#E53935;font-size:24px;font-weight:bold;'>❌ Fake News</span>"
+    st.text_area(
+        label="Sample_Texts",
+        value=sample_text,
+        height=350,
+        label_visibility="collapsed",
+        key="sample_text_box"
     )
 
-    sample_text = sample_text.replace(
-        "Real :",
-        "<span style='color:#16A34A;font-size:24px;font-weight:bold;'>✅ Real News</span>"
-    )
+else:
+    st.error("⚠ Sample_Texts.txt file not found.")
 
-    st.components.v1.html(
-        f"""
-        <div style="
-            background:#F5F7FA;
-            border:1px solid #D1D5DB;
-            border-radius:18px;
-            padding:25px;
-            height:420px;
-            overflow-y:auto;
-            white-space:pre-wrap;
-            font-size:16px;
-            line-height:1.8;
-            color:#222;
-            font-family:Arial,sans-serif;
-            box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+# ==========================================================
+# FAKE NEWS DETECTION
+# ==========================================================
 
-            {sample_text}
+st.markdown(
+    '<div class="section-title">📰 Fake News Detection</div>',
+    unsafe_allow_html=True
+)
 
-        </div>
-        """,
-        height=440,
-        scrolling=False
-    )
+st.write("Paste a complete news article or headline below.")
 
-    st.markdown("<br>", unsafe_allow_html=True)
+text_input = st.text_area(
+    "Paste News Article",
+    height=220,
+    placeholder="Paste your news article here..."
+)
 
-    # ==========================================
-    # Try It Yourself
-    # ==========================================
-    st.markdown(
-        '<div class="section-title">🤖 Try It Yourself (Check some sample test news are given above)</div>',
-        unsafe_allow_html=True
-    )
+predict_clicked = st.button(
+    "🔮 Predict News",
+    use_container_width=True
+)
 
-    text_input = st.text_area(
-        "Paste a news headline or article body",
-        "",
-        height=220
-    )
+# ==========================================================
+# PREDICTION RESULT
+# ==========================================================
 
-    # ==========================================
-    # Prediction
-    # ==========================================
-    if st.button("🔮 Predict"):
+if predict_clicked:
 
-        if text_input.strip() == "":
-            st.warning("⚠ Please enter a news article.")
+    if text_input.strip() == "":
+        st.warning("⚠ Please enter a news article.")
+
+    else:
+
+        with st.spinner("🤖 Analyzing News..."):
+
+            cleaned_text = clean_text(text_input)
+
+            vector = vectorizer.transform([cleaned_text])
+
+            prediction = model.predict(vector)[0]
+
+            try:
+                score = model.decision_function(vector)[0]
+                confidence = (1 / (1 + np.exp(-abs(score)))) * 100
+            except Exception:
+                confidence = 100.0
+
+        st.markdown(
+            '<div class="section-title">📝 Prediction Result</div>',
+            unsafe_allow_html=True
+        )
+
+        # Change these if your labels are reversed
+        if prediction == 1:
+
+            st.success(f"""
+✅ **REAL NEWS**
+
+**Confidence Score:** {confidence:.2f}%
+
+The machine learning model predicts this article is **REAL / GENUINE**.
+""")
 
         else:
 
-            with st.spinner("Analyzing News..."):
+            st.error(f"""
+❌ **FAKE NEWS**
 
-                cleaned = clean_text(text_input)
-                vector = vectorizer.transform([cleaned])
+**Confidence Score:** {confidence:.2f}%
 
-                prediction = model.predict(vector)[0]
-                probability = model.predict_proba(vector)[0]
+The machine learning model predicts this article is **FAKE / MISLEADING**.
+""")
 
-            if prediction == 1:
-
-                confidence = probability[1] * 100
-
-                st.markdown(f"""
-                <div class="result-card result-real">
-                    <h2>✅ Predicted: Real News</h2>
-                    <p style="font-size:22px;">
-                        Confidence: <b>{confidence:.2f}%</b>
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
-
-                st.progress(float(probability[1]))
-
-            else:
-
-                confidence = probability[0] * 100
-
-                st.markdown(f"""
-                <div class="result-card result-fake">
-                    <h2>❌ Predicted: Fake News</h2>
-                    <p style="font-size:22px;">
-                        Confidence: <b>{confidence:.2f}%</b>
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
-
-                st.progress(float(probability[0]))
-
-st.markdown("---")
+        with st.expander("🔍 View Processed Text Used by the Model"):
+            st.write(cleaned_text)
