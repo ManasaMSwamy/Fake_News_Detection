@@ -6,6 +6,11 @@ import seaborn as sns
 import re
 import os
 import joblib
+import nltk
+
+nltk.download("stopwords")
+nltk.download("wordnet")
+nltk.download("omw-1.4")
 
 # ============================================================
 # PAGE CONFIGURATION
@@ -283,30 +288,84 @@ with tab_overview:
 # TAB 2 — EXPLORE
 # ------------------------------------------------------------
 with tab_explore:
-    st.markdown('<div class="section-title">Preview by News Type</div>', unsafe_allow_html=True)
-    label_choice = st.selectbox('Select News Type to Preview', df['label_name'].unique())
-    st.dataframe(
-        df[df['label_name'] == label_choice][['title', 'text', 'subject']].head(),
-        width=True
+
+    # ========================================================
+    # Preview by News Type
+    # ========================================================
+    st.markdown(
+        '<div class="section-title">Preview by News Type</div>',
+        unsafe_allow_html=True
     )
 
-    st.markdown('<div class="section-title">Browse by Subject</div>', unsafe_allow_html=True)
-    subject_choice = st.selectbox('Select Subject', sorted(df['subject'].unique()))
-    st.dataframe(
-        df[df['subject'] == subject_choice][['title', 'label_name']].head(),
-        width=True
+    label_choice = st.selectbox(
+        "Select News Type to Preview",
+        sorted(df["label_name"].unique())
     )
 
-    st.markdown('<div class="section-title">Filter by Word Count</div>', unsafe_allow_html=True)
+    preview_df = df.loc[
+        df["label_name"] == label_choice,
+        ["title", "text", "subject"]
+    ].head(5)
+
+    st.dataframe(
+        preview_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.write("")
+
+    # ========================================================
+    # Browse by Subject
+    # ========================================================
+    st.markdown(
+        '<div class="section-title">Browse by Subject</div>',
+        unsafe_allow_html=True
+    )
+
+    subject_choice = st.selectbox(
+        "Select Subject",
+        sorted(df["subject"].unique())
+    )
+
+    subject_df = df.loc[
+        df["subject"] == subject_choice,
+        ["title", "label_name"]
+    ].head(5)
+
+    st.dataframe(
+        subject_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.write("")
+
+    # ========================================================
+    # Filter by Word Count
+    # ========================================================
+    st.markdown(
+        '<div class="section-title">Filter by Word Count</div>',
+        unsafe_allow_html=True
+    )
+
     max_words = st.slider(
         "Select Maximum Word Count",
-        int(df['word_count'].min()),
-        int(df['word_count'].quantile(0.99)),   # cap at 99th percentile to avoid extreme outliers
-        int(df['word_count'].quantile(0.99)),
+        int(df["word_count"].min()),
+        int(df["word_count"].quantile(0.99)),
+        int(df["word_count"].quantile(0.99))
     )
-    filtered_df = df[df['word_count'] <= max_words]
-    st.dataframe(filtered_df[['title', 'word_count', 'label_name']], use_container_width=True)
 
+    filtered_df = df.loc[
+        df["word_count"] <= max_words,
+        ["title", "word_count", "label_name"]
+    ].head(20)
+
+    st.dataframe(
+        filtered_df,
+        use_container_width=True,
+        hide_index=True
+    )
 # ------------------------------------------------------------
 # TAB 3 — VISUALIZATIONS
 # ------------------------------------------------------------
@@ -432,89 +491,89 @@ with tab_predict:
     </div>
     """, unsafe_allow_html=True)
 
-# ==========================================================
-# SAMPLE TEST NEWS
-# ==========================================================
+    # ==========================================================
+    # SAMPLE TEST NEWS
+    # ==========================================================
 
-st.markdown(
-    '<div class="section-title">📋 Sample Test News</div>',
-    unsafe_allow_html=True
-)
-
-st.info("📄 Copy any sample below and paste it into the prediction box.")
-
-if os.path.exists("Sample_Texts.txt"):
-
-    with open("Sample_Texts.txt", "r", encoding="utf-8") as file:
-        sample_text = file.read()
-
-    st.text_area(
-        label="Sample_Texts",
-        value=sample_text,
-        height=350,
-        label_visibility="collapsed",
-        key="sample_text_box"
+    st.markdown(
+        '<div class="section-title">📋 Sample Test News</div>',
+        unsafe_allow_html=True
     )
 
-else:
-    st.error("⚠ Sample_Texts.txt file not found.")
+    st.info("📄 Copy any sample below and paste it into the prediction box.")
 
-# ==========================================================
-# FAKE NEWS DETECTION
-# ==========================================================
+    if os.path.exists("Sample_Texts.txt"):
 
-st.markdown(
-    '<div class="section-title">📰 Fake News Detection</div>',
-    unsafe_allow_html=True
-)
+        with open("Sample_Texts.txt", "r", encoding="utf-8") as file:
+            sample_text = file.read()
 
-st.write("Paste a complete news article or headline below.")
-
-text_input = st.text_area(
-    "Paste News Article",
-    height=220,
-    placeholder="Paste your news article here..."
-)
-
-predict_clicked = st.button(
-    "🔮 Predict News",
-    use_container_width=True
-)
-
-# ==========================================================
-# PREDICTION RESULT
-# ==========================================================
-
-if predict_clicked:
-
-    if text_input.strip() == "":
-        st.warning("⚠ Please enter a news article.")
-
-    else:
-
-        with st.spinner("🤖 Analyzing News..."):
-
-            cleaned_text = clean_text(text_input)
-
-            vector = vectorizer.transform([cleaned_text])
-
-            prediction = model.predict(vector)[0]
-
-            try:
-                score = model.decision_function(vector)[0]
-                confidence = (1 / (1 + np.exp(-abs(score)))) * 100
-            except Exception:
-                confidence = 100.0
-
-        st.markdown(
-            '<div class="section-title">📝 Prediction Result</div>',
-            unsafe_allow_html=True
+        st.text_area(
+            label="Sample_Texts",
+            value=sample_text,
+            height=350,
+            label_visibility="collapsed",
+            key="sample_text_box"
         )
 
-        # Change these if your labels are reversed
-        if prediction == 1:
+    else:
+        st.error("⚠ Sample_Texts.txt file not found.")
 
-            st.success(f"""
+    # ==========================================================
+    # FAKE NEWS DETECTION
+    # ==========================================================
+
+    st.markdown(
+        '<div class="section-title">📰 Fake News Detection</div>',
+        unsafe_allow_html=True
+    )
+
+    st.write("Paste a complete news article or headline below.")
+
+    text_input = st.text_area(
+        "Paste News Article",
+        height=220,
+        placeholder="Paste your news article here..."
+    )
+
+    predict_clicked = st.button(
+        "🔮 Predict News",
+        use_container_width=True
+    )
+
+    # ==========================================================
+    # PREDICTION RESULT
+    # ==========================================================
+
+    if predict_clicked:
+
+        if text_input.strip() == "":
+            st.warning("⚠ Please enter a news article.")
+
+        else:
+
+            with st.spinner("🤖 Analyzing News..."):
+
+                cleaned_text = clean_text(text_input)
+
+                vector = vectorizer.transform([cleaned_text])
+
+                prediction = model.predict(vector)[0]
+
+                try:
+                    score = model.decision_function(vector)[0]
+                    confidence = (1 / (1 + np.exp(-abs(score)))) * 100
+                except Exception:
+                    confidence = 100.0
+
+            st.markdown(
+                '<div class="section-title">📝 Prediction Result</div>',
+                unsafe_allow_html=True
+            )
+
+            # Change these if your labels are reversed
+            if prediction == 1:
+
+                st.success(f"""
 ✅ **REAL NEWS**
 
 **Confidence Score:** {confidence:.2f}%
@@ -522,9 +581,9 @@ if predict_clicked:
 The machine learning model predicts this article is **REAL / GENUINE**.
 """)
 
-        else:
+            else:
 
-            st.error(f"""
+                st.error(f"""
 ❌ **FAKE NEWS**
 
 **Confidence Score:** {confidence:.2f}%
@@ -532,5 +591,5 @@ The machine learning model predicts this article is **REAL / GENUINE**.
 The machine learning model predicts this article is **FAKE / MISLEADING**.
 """)
 
-        with st.expander("🔍 View Processed Text Used by the Model"):
-            st.write(cleaned_text)
+            with st.expander("🔍 View Processed Text Used by the Model"):
+                st.write(cleaned_text)
